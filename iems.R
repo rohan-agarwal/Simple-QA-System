@@ -1,6 +1,6 @@
 # ----init----
 
-# tm package is used for corpus creation, processing, document term matrix, tf-idf...
+# tm package is used for corpus creation, processing, dtm, tf-idf...
 library(tm)
 
 # RWeka package is used to create a custom tokenizer
@@ -21,8 +21,19 @@ worder <- Maxent_Word_Token_Annotator()
 # initiate POS tagging annotator
 tagger <- Maxent_POS_Tag_Annotator()
 
+# note: need to install openNLPmodels.en package for NER tagging
+#install.packages("openNLPmodels.en", 
+#                 repos = "http://datacube.wu.ac.at/", type = "source")
+
+# initiate person tagging annotator using NER
+personTagger <- Maxent_Entity_Annotator(kind="person")
+
+# initiate company tagging annotator using NER
+compTagger <- Maxent_Entity_Annotator(kind="organization")
+
 # loading corpus
-files <- DirSource("~/Documents/R/IEMS395 HW4/BI")
+pwd <- paste(getwd(),"/BI",sep="")
+files <- DirSource(pwd)
 corpus <- Corpus(files,
                  readerControl=list(language="en"))
 
@@ -47,22 +58,6 @@ CreateDTM <- function(corp,min,max) {
   
 }
 
-# processing a question: punctuation, stop words
-# ProcessQuestion <- function(question) {
-#   
-#   question <- Corpus(VectorSource(question))
-#   question <- tm_map(question,
-#                      removePunctuation)
-#   question <- tm_map(question,
-#                      removeWords,
-#                      stopwords('english'))
-#   question <- as.character(sapply(question, 
-#                                   `[`, "content"))
-#   
-#   return(question)
-#   
-# }
-
 # identifying keywords to look for in the document term matrix
 FindKeywords <- function(words) {
   
@@ -74,7 +69,7 @@ FindKeywords <- function(words) {
   tags <- sapply(pos$features, `[[`, "POS")
   words <- words[pos]
   
-  keywords <- words[tags == "NNP" | tags == "CD"]
+  keywords <- words[tags == "NNP" | tags == "JJ" | tags == "CD"]
   
   return(keywords)
   
@@ -133,8 +128,8 @@ FindSentences <- function(paragraph) {
   locations <- annotate(paragraph,sentencer)
   sentences <- paragraph[locations]
   
+  sentences <- as.character(sentences)
   sentences <- sentences[nchar(sentences) > 3]
-  
   return(sentences)
   
 }
@@ -146,9 +141,15 @@ RankSentences <- function(sentences,keywords) {
   dtm <- DocumentTermMatrix(senCorp)
   tfidf <- weightTfIdf(dtm, normalize=TRUE)
   
-  mat <- tfidf[apply(tfidf[,tolower(keywords)], 1, 
-                            function(x) all(x>0) && mean(x)>0),
-                      tolower(keywords)]
+  terms <- sapply(keywords, 
+                  function(x) colnames(tfidf)[grepl(tolower(x),
+                                                    colnames(tfidf))])
+  terms <- c(unlist(terms))
+  terms <- unique(terms)
+  
+  mat <- tfidf[apply(tfidf[,tolower(terms)], 1, 
+                            function(x) mean(x)>0),
+                      tolower(terms)]
   mat <- as.matrix(mat)
   
   scores <- sort(apply(mat, 1, function(x) mean(x)), decreasing=TRUE)
@@ -158,19 +159,56 @@ RankSentences <- function(sentences,keywords) {
   
 }
 
-# finding the CEO name
-FindCEONames <- function(sentence) {
+# extracting relevant names
+GetNames <- function(ranks) {
   
-  locations <- gregexpr("CEO [A-Z][a-z]* [A-Z][a-z]*",sentence)
-  names <- regmatches(sentence,locations)
-  
-  if (length(names[[1]]) > 0) {
+  if ("CEO" %in% keywords) {
     
-    names <- substr(names,5,nchar(names))
+    func <- function(sentence) {
+      
+      locations <- gregexpr("[A-Z][a-z]+ [A-Z]+[a-z]+",sentence)
+      names <- regmatches(sentence,locations)
+      return(names)
+      
+    }
+  
+  }
+  
+  if ("bankrupt" %in% keywords) {
+    
+    func <- function(sentence) {
+      
+      sentence <- as.String(sentence)
+      a2 <- annotate(sentence, list(sentencer, worder))
+      
+      if (as.numeric(length(compTagger(sentence,a2)) > 0)) {
+        names <- sentence[compTagger(sentence, a2)]
+        return(names)
+      }
+      
+    }
     
   }
   
-  return(names)
+  allNames <- lapply(ranks$sentences, func)
+  
+  return(list("names" = allNames, 
+              "scores" = ranks$scores))
+  
+}
+
+# ranking the names based on tf-idf scores
+RankNames <- function(names) {
+  
+  uniqueNames <- unique(unlist(names$names))
+  nameScore <- rep(0,length(uniqueNames))
+  
+  nameScore <- sapply(uniqueNames, 
+                      function(x) sum(as.numeric(names$scores[grepl(x,names$names)])))
+  
+  topNames <- sort(nameScore,decreasing=TRUE)[1:5]
+  
+  return(topNames)
   
 }
 
@@ -182,21 +220,24 @@ masterTFxIDF <- weightTfIdf(masterDTM,
                             normalize=TRUE) 
 masterTFxIDF <- as.matrix(masterTFxIDF)
 
-question <- readline("Enter a question: ")
-keywords <- FindKeywords(question)
-searchDocs <- FindDocuments(keywords)
-paragraphs <- FindParagraphs(keywords,searchDocs)
-sentences <- unlist(lapply(paragraphs, FindSentences))
-ranks <- RankSentences(sentences,keywords)
-sentences <- ranks$sentences
-scores <- ranks$scores
+main <- function() {
+  
+  question <- readline("Enter a question: ")
+  print("Generating keywords..."); flush.console()
+  keywords <<- FindKeywords(question)
+  print("Finding relevant documents..."); flush.console()
+  searchDocs <- FindDocuments(keywords)
+  print("Finding relevant paragraphs..."); flush.console()
+  paragraphs <- FindParagraphs(keywords,searchDocs)
+  print("Finding relevant sentences..."); flush.console()
+  sentences <- unlist(lapply(paragraphs, FindSentences))
+  print("Ranking sentences...")
+  ranks <- RankSentences(sentences,keywords)
+  print("Extracting names...")
+  names <- GetNames(ranks)
+  print("Top 5 results with scores:");flush.console()
+  finalNames <- RankNames(names)
+  
+  return(finalNames)
 
-# if q1: which companies went bankrupt in month _ of year _?
-
-
-# if q2: who is the CEO of company _? 
-names <- unlist(lapply(sentences, FindCEONames))
-finalName <- names(which.max(table(names)))
-print(finalName)
-
-# if q3: what factors affect GDP? what percentage changes are associated with them?
+}
