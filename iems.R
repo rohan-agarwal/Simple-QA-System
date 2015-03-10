@@ -1,4 +1,4 @@
-# ----init----
+  # ----init----
 
 # tm package is used for corpus creation, processing, dtm, tf-idf...
 library(tm)
@@ -69,8 +69,17 @@ FindKeywords <- function(words) {
   tags <- sapply(pos$features, `[[`, "POS")
   words <- words[pos]
   
-  keywords <- words[tags == "NNP" | tags == "JJ" | tags == "CD"]
-  
+  #rule-based keyword extraction
+  if ("Who" %in% words) {
+    keywords <- words[tags == "NNP"]
+  }
+  if ("Which" %in% words) {
+    keywords <- words[tags == "NNP" | tags == "JJ" | tags == "CD"]
+  }
+  if ("affects" %in% words) {
+    keywords <- c(words[tags == "NNP"],"factor")
+  }
+
   return(keywords)
   
 }
@@ -79,8 +88,9 @@ FindKeywords <- function(words) {
 FindDocuments <- function(keywords) {
   
   terms <- sapply(keywords, 
-                  function(x) colnames(masterTFxIDF)[grepl(tolower(x),
-                                                           colnames(masterTFxIDF))])
+                  function(x) colnames(masterTFxIDF)[
+                    grepl(tolower(x),
+                          colnames(masterTFxIDF))])
   terms <- c(unlist(terms))
   
   mat <- masterTFxIDF[apply(masterTFxIDF[,tolower(terms)], 1, 
@@ -190,6 +200,22 @@ GetNames <- function(ranks) {
     
   }
   
+  if ("GDP" %in% keywords) {
+    words <- ranks$sentences[grepl("GDP",ranks$sentences) & 
+                                   grepl("factor",ranks$sentences)]
+    words <- words[grepl("%",words) | grepl("percent",words)]
+    
+    words <- as.String(words)
+    wordsAnn <- annotate(words, list(sentencer, worder))
+    pos <- annotate(words, tagger, wordsAnn)
+    
+    pos <- subset(pos, type == "word")
+    tags <- sapply(pos$features, `[[`, "POS")
+    words <- words[pos]
+    
+    words[tags == "NNS" | tags == "NN" | tags == "JJ"]
+  }
+  
   allNames <- lapply(ranks$sentences, func)
   
   return(list("names" = allNames, 
@@ -204,7 +230,8 @@ RankNames <- function(names) {
   nameScore <- rep(0,length(uniqueNames))
   
   nameScore <- sapply(uniqueNames, 
-                      function(x) sum(as.numeric(names$scores[grepl(x,names$names)])))
+                      function(x) 
+                        sum(as.numeric(names$scores[grepl(x,names$names)])))
   
   topNames <- sort(nameScore,decreasing=TRUE)[1:5]
   
