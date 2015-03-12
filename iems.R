@@ -1,10 +1,7 @@
-  # ----init----
+# ----init----
 
 # tm package is used for corpus creation, processing, dtm, tf-idf...
 library(tm)
-
-# RWeka package is used to create a custom tokenizer
-library(RWeka)
 
 # stringr package is used for string manipulation
 library(stringr)
@@ -25,9 +22,6 @@ tagger <- Maxent_POS_Tag_Annotator()
 #install.packages("openNLPmodels.en", 
 #                 repos = "http://datacube.wu.ac.at/", type = "source")
 
-# initiate person tagging annotator using NER
-personTagger <- Maxent_Entity_Annotator(kind="person")
-
 # initiate company tagging annotator using NER
 compTagger <- Maxent_Entity_Annotator(kind="organization")
 
@@ -38,25 +32,6 @@ corpus <- Corpus(files,
                  readerControl=list(language="en"))
 
 # ----functions----
-
-# tokenizing functions to select all tokens of size between [min] and [max] words
-Tokenizer <- function(doc,min,max) {
-  
-  NGramTokenizer(doc, 
-                 Weka_control(min = min, max = max))
-  
-}
-
-# creating document term matrix
-CreateDTM <- function(corp,min,max) {
-  
-  dtm <- DocumentTermMatrix(corp, 
-                            control = list(
-                              tokenize = Tokenizer(doc=corp,min=min,max=max)))
-  
-  return(dtm)
-  
-}
 
 # identifying keywords to look for in the document term matrix
 FindKeywords <- function(words) {
@@ -79,6 +54,9 @@ FindKeywords <- function(words) {
   if ("affects" %in% words) {
     keywords <- c(words[tags == "NNP"],"factor")
   }
+  if ("associated" %in% words) {
+    keywords <- c(words[11:(length(words)-1)],"GDP")
+  }
 
   return(keywords)
   
@@ -92,6 +70,7 @@ FindDocuments <- function(keywords) {
                     grepl(tolower(x),
                           colnames(masterTFxIDF))])
   terms <- c(unlist(terms))
+  terms <- unique(terms)
   
   mat <- masterTFxIDF[apply(masterTFxIDF[,tolower(terms)], 1, 
                             function(x) mean(x)>0),
@@ -201,19 +180,14 @@ GetNames <- function(ranks) {
   }
   
   if ("GDP" %in% keywords) {
-    words <- ranks$sentences[grepl("GDP",ranks$sentences) & 
-                                   grepl("factor",ranks$sentences)]
+    
+    df <- data.frame(sapply(keywords, 
+                            grepl, 
+                            ranks$sentences))
+    
+    words <- ranks$sentences[apply(df, 1, function(x) all(as.numeric(x)>0))]
     words <- words[grepl("%",words) | grepl("percent",words)]
-    
-    words <- as.String(words)
-    wordsAnn <- annotate(words, list(sentencer, worder))
-    pos <- annotate(words, tagger, wordsAnn)
-    
-    pos <- subset(pos, type == "word")
-    tags <- sapply(pos$features, `[[`, "POS")
-    words <- words[pos]
-    
-    words[tags == "NNS" | tags == "NN" | tags == "JJ"]
+    return(words)
   }
   
   allNames <- lapply(ranks$sentences, func)
@@ -224,17 +198,47 @@ GetNames <- function(ranks) {
 }
 
 # ranking the names based on tf-idf scores
-RankNames <- function(names) {
+RankNames <- function(names,question) {
   
-  uniqueNames <- unique(unlist(names$names))
-  nameScore <- rep(0,length(uniqueNames))
+  if (grepl("What affects GDP",question)) {
+    topNames <- names
+  }
   
-  nameScore <- sapply(uniqueNames, 
-                      function(x) 
-                        sum(as.numeric(names$scores[grepl(x,names$names)])))
+  else if (grepl("drop or increase",question)) {
+    
+    topNames <- vector();
+    
+    for (i in 1:length(names)) {
+      
+      words <- as.String(names[i])
+      wordsAnn <- annotate(words, list(sentencer, worder))
+      pos <- annotate(words, tagger, wordsAnn)
+      
+      pos <- subset(pos, type == "word")
+      tags <- sapply(pos$features, `[[`, "POS")
+      words <- words[pos]
+      
+      for (i in 1:length(words)) {
+        if (tags[i] == "CD" && words[i+1] == "%") {
+          topNames <- c(topNames,paste(words[i],words[i+1],sep=""))
+        }
+      }
+    
+    }
+    
+  }
   
-  topNames <- sort(nameScore,decreasing=TRUE)[1:5]
-  
+  else {
+    uniqueNames <- unique(unlist(names$names))
+    nameScore <- rep(0,length(uniqueNames))
+    
+    nameScore <- sapply(uniqueNames, 
+                        function(x) 
+                          sum(as.numeric(names$scores[grepl(x,names$names)])))
+    
+    topNames <- sort(nameScore,decreasing=TRUE)[1:5]
+  }
+
   return(topNames)
   
 }
@@ -245,7 +249,7 @@ RankNames <- function(names) {
 masterDTM <- DocumentTermMatrix(corpus)
 masterTFxIDF <- weightTfIdf(masterDTM, 
                             normalize=TRUE) 
-masterTFxIDF <- as.matrix(masterTFxIDF)
+#masterTFxIDF <- as.matrix(masterTFxIDF)
 
 main <- function() {
   
@@ -262,8 +266,20 @@ main <- function() {
   ranks <- RankSentences(sentences,keywords)
   print("Extracting names...")
   names <- GetNames(ranks)
-  print("Top 5 results with scores:");flush.console()
-  finalNames <- RankNames(names)
+  print("Getting final answer...")
+  finalNames <- RankNames(names,question)
+  
+  if (grepl("What affects GDP",question)) {
+    print("Below are related sentences indicating the factors that affect GDP:");flush.console()
+  }
+  
+  else if (grepl("drop or increase",question)) {
+    print("Below are all related percentages:");flush.console()
+  }
+  
+  else {
+    print("Top 5 results with scores:");flush.console()
+  }
   
   return(finalNames)
 
