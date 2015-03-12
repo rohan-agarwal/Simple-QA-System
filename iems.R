@@ -52,7 +52,7 @@ FindKeywords <- function(words) {
     keywords <- words[tags == "NNP" | tags == "JJ" | tags == "CD"]
   }
   if ("affects" %in% words) {
-    keywords <- c(words[tags == "NNP"],"factor")
+    keywords <- c(words[tags == "NNP"])
   }
   if ("associated" %in% words) {
     keywords <- c(words[11:(length(words)-1)],"GDP")
@@ -201,7 +201,7 @@ GetNames <- function(ranks) {
 RankNames <- function(names,question) {
   
   if (grepl("What affects GDP",question)) {
-    topNames <- names
+    topNames <- names[grepl("factor",names) | grepl("component",names)]
   }
   
   else if (grepl("drop or increase",question)) {
