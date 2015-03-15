@@ -1,3 +1,7 @@
+# ----INSTRUCTIONS----
+# 1) Run ALL of the code once - select everything and run it in console
+# 2) Execute the main() function in order to ask a question
+
 # ----init----
 
 # tm package is used for corpus creation, processing, dtm, tf-idf...
